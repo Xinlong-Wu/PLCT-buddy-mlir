@@ -21,6 +21,18 @@
 import torch
 import torch.nn as nn
 
+class AddMMModule(nn.Module):
+    def __init__(self):
+        super(AddMMModule, self).__init__()
+
+    def forward(self, x, y, z):
+        print("x: "+str(x))
+        print("y: "+str(y))
+        print("z: "+str(z))
+        data = torch.ops.aten.addmm(z, x, y)
+        print("res: " + str(data))
+        return data.permute([1,0])
+
 class TestModule(nn.Module):
     def __init__(self):
         super(TestModule, self).__init__()

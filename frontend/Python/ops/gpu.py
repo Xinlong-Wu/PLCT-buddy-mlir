@@ -25,6 +25,7 @@ from mlir.dialects import gpu, memref, arith, scf, vector
 
 from ..graph import TensorDType
 from ..graph import (
+    AddMMOp,
     ReluOp,
     ReshapeOp,
     PermuteOp,
@@ -111,6 +112,121 @@ def relu_op(node: ReluOp, symbol_table: Dict[Tuple[str, int], ir.Operation]):
     memref.CopyOp(input, output)
     return output
 
+def addmm_op(
+    node: AddMMOp, symbol_table: Dict[Tuple[str, int], ir.Operation]
+):
+    mat1 = symbol_table.get((str(node.args[1]), 0), node.args[1])
+    mat2 = symbol_table.get((str(node.args[2]), 0), node.args[2])
+    bias = symbol_table.get((str(node.args[0]), 0), node.args[0])
+
+    # TODO: Reverse the order of the mat2 before multiplication to optimize the cache hit rate
+
+    output_shape = list(node.tensor_meta["shape"])
+    mat1_shape = mat1.type.shape
+    mat2_shape = mat2.type.shape
+    bias_shape = bias.type.shape
+
+    dtype = node.tensor_meta["dtype"]
+    element_type = mlir_element_type_get(dtype)
+
+    c0 = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), 0))
+    c1 = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), 1))
+    kernels = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), 512))
+
+    # Flatten the input into a one-dimensional format 
+    mat1_size = tensor_shape_size(mat1_shape)
+    mat2_size = tensor_shape_size(mat2_shape)
+    output_size = tensor_shape_size(output_shape)
+
+    mat1_size_c = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), mat1_size))
+    mat2_size_c = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), mat2_size))
+    output_size_c = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), output_size))
+
+    mat1_shape_1d = memref.AllocOp(ir.MemRefType.get([1], ir.IndexType.get()), [], [])
+    mat2_shape_1d = memref.AllocOp(ir.MemRefType.get([1], ir.IndexType.get()), [], [])
+    output_shape_1d = memref.AllocOp(ir.MemRefType.get([1], ir.IndexType.get()), [], [])
+
+    memref.StoreOp(mat1_size_c, mat1_shape_1d, [c0])
+    memref.StoreOp(mat2_size_c, mat2_shape_1d, [c0])
+    memref.StoreOp(output_size_c, output_shape_1d, [c0])
+
+    mat1_reshape_type = ir.MemRefType.get([mat1_size], element_type)
+    mat2_reshape_type = ir.MemRefType.get([mat2_size], element_type)
+    output_reshape_type = ir.MemRefType.get([output_size], element_type)
+
+    mat1_reshape = memref.ReshapeOp(mat1_reshape_type, mat1, mat1_shape_1d)
+    mat2_reshape = memref.ReshapeOp(mat2_reshape_type, mat2, mat2_shape_1d)
+    output_reshape = memref.ReshapeOp(output_reshape_type, bias, output_shape_1d)
+
+    unranked_memref_type = ir.UnrankedMemRefType.get(element_type, ir.IntegerAttr.get(ir.IndexType.get(), 0))
+    gpu.HostRegisterOp(memref.CastOp(unranked_memref_type, mat1))
+    gpu.HostRegisterOp(memref.CastOp(unranked_memref_type, mat2))
+    gpu.HostRegisterOp(memref.CastOp(unranked_memref_type, bias))
+
+    row = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), mat1_shape[0]))
+    col = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), mat2_shape[1]))
+    inner_dim = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), mat1_shape[1]))
+
+    gpu_kernel = gpu.LaunchOp(
+        asyncToken=None,
+        asyncDependencies=[],
+        gridSizeX=c1.result, gridSizeY=c1.result, gridSizeZ=c1.result,
+        blockSizeX=kernels.result, blockSizeY=c1.result, blockSizeZ=c1.result,
+    )
+    gpu_kernel_block = ir.Block.create_at_start(
+        gpu_kernel.body,
+        [
+            ir.IndexType.get(), ir.IndexType.get(), ir.IndexType.get(),     # block_idx, block_idy, block_idz
+            ir.IndexType.get(), ir.IndexType.get(), ir.IndexType.get(),     # thread_idx , thread_idy, thread_idz
+            ir.IndexType.get(), ir.IndexType.get(), ir.IndexType.get(),     # grid_size x, grid_size y, grid_size z
+            ir.IndexType.get(), ir.IndexType.get(), ir.IndexType.get(),     # block_size x, block_size y, block_size z
+        ]
+    )
+
+    # TODO: optimize to one dimension
+    with ir.InsertionPoint(gpu_kernel_block):
+        tIdX = gpu_kernel_block.arguments[3]
+        tIdY = gpu_kernel_block.arguments[4]
+        otter_loop = scf.ForOp(
+            lower_bound=tIdX,
+            upper_bound=row,
+            step=gpu_kernel.blockSizeX
+        )
+        with ir.InsertionPoint(otter_loop.body):
+            inner_loop = scf.ForOp(
+                lower_bound=tIdY,
+                upper_bound=col,
+                step=gpu_kernel.blockSizeY
+            )
+            with ir.InsertionPoint(inner_loop.body):
+                initial_sum = arith.ConstantOp(ir.F32Type.get(), ir.FloatAttr.get(ir.F32Type.get(), 0.0))
+
+                mul_loop = scf.ForOp(
+                    lower_bound=c0.result,
+                    upper_bound=inner_dim,
+                    step=c1.result,
+                    iter_args=[initial_sum]
+                )
+                with ir.InsertionPoint(mul_loop.body):
+                    sum = mul_loop.inner_iter_args[0]
+                    mat1_load = memref.LoadOp(mat1_reshape, [arith.AddIOp(arith.MulIOp(otter_loop.induction_variable, inner_dim).result, mul_loop.induction_variable)])
+                    mat2_load = memref.LoadOp(mat2_reshape, [arith.AddIOp(arith.MulIOp(mul_loop.induction_variable, col).result, inner_loop.induction_variable)])
+                    res = arith.MulFOp(mat1_load, mat2_load)
+                    res = arith.AddFOp(sum, res)
+                    scf.YieldOp([res])
+                
+                sum = mul_loop.result
+                bias_load = memref.LoadOp(output_reshape, [arith.AddIOp(arith.MulIOp(otter_loop.induction_variable, col).result, inner_loop.induction_variable)])
+                res = arith.AddFOp(sum, bias_load)
+                memref.StoreOp(res, output_reshape, [arith.AddIOp(arith.MulIOp(otter_loop.induction_variable, col).result, inner_loop.induction_variable)])
+                scf.YieldOp([])
+            scf.YieldOp([])
+
+        gpu.TerminatorOp()
+
+    output = memref.AllocOp(ir.MemRefType.get(output_shape, element_type), [], [])
+    memref.CopyOp(bias, output)
+    return output
 
 # TODO: Implement Reshape Operation on GPU in future revisions.
 def reshape_op(node: ReshapeOp, symbol_table):
@@ -546,6 +662,7 @@ def maxpool2d_op(node: MaxPool2dOp, symbol_table):
 
 
 ops_registry = {
+    "AddMMOp": addmm_op,
     "ReluOp": relu_op,
     "ViewOp": reshape_op,
     "PermuteOp": permute_op,
