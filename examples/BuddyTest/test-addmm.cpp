@@ -31,61 +31,84 @@ _mlir_ciface_forward(MemRef<float, 2> *result, MemRef<float, 2> *input1,
 
 int main() {
   /// Initialize data containers.
-  MemRef<float, 2> input1({2, 4});
-  MemRef<float, 2> input2({4, 2});
-  MemRef<float, 2> bias({4, 4});
-  MemRef<float, 2> result({4, 4});
+  MemRef<float, 2> input1({1, 3});
+  MemRef<float, 2> input2({2, 3});
+  MemRef<float, 2> bias({1, 2});
+  MemRef<float, 2> result({1, 2});
 
-  for (int i = 0; i < 4; i++) {
-    for (int j = 0; j < 2; j++) {
-      int index = i * 2 + j;
+  for (int i = 0; i < 1; i++) {
+    for (int j = 0; j < 3; j++) {
+      int index = i * 3 + j;
       input1[index] = static_cast<float>(index + 1);
     }
   }
 
   for (int i = 0; i < 2; i++) {
-    for (int j = 0; j < 4; j++) {
-      int index = i * 4 + j;
+    for (int j = 0; j < 3; j++) {
+      int index = i * 3 + j;
       input2[index] = static_cast<float>(j + 1);
     }
   }
 
-  for (int i = 0; i < 4; i++) {
-    for (int j = 0; j < 4; j++) {
-      int index = i * 4 + j;
+  for (int i = 0; i < 1; i++) {
+    for (int j = 0; j < 2; j++) {
+      int index = i * 2 + j;
       bias[index] = static_cast<float>(-1);
+    }
+  }
+
+  // init result
+  for (int i = 0; i < 1; i++) {
+    for (int j = 0; j < 2; j++) {
+      int index = i * 2 + j;
+      result[index] = static_cast<float>(0);
     }
   }
 
   // Print the generated data to verify
   std::cout << "Input1: " << std::endl;
-  for (int i = 0; i < 4; i++) {
-    for (int j = 0; j < 2; j++) {
-      std::cout << "\t" << input1[i * 2 + j] << " ";
+  for (int i = 0; i < 1; i++) {
+    for (int j = 0; j < 3; j++) {
+      std::cout << "\t" << input1[i * 3 + j] << " ";
     }
     std::cout << std::endl;
   }
 
   std::cout << "Input2: " << std::endl;
   for (int i = 0; i < 2; i++) {
-    for (int j = 0; j < 4; j++) {
-      std::cout << "\t" << input2[i * 4 + j] << " ";
+    for (int j = 0; j < 3; j++) {
+      std::cout << "\t" << input2[i * 3 + j] << " ";
     }
     std::cout << std::endl;
   }
 
   std::cout << "Bias: " << std::endl;
-  for (int i = 0; i < 4; i++) {
-    for (int j = 0; j < 4; j++) {
-      std::cout << "\t" << bias[i * 4 + j] << " ";
+  for (int i = 0; i < 1; i++) {
+    for (int j = 0; j < 2; j++) {
+      std::cout << "\t" << bias[i * 2 + j] << " ";
     }
     std::cout << std::endl;
   }
 
+  std::cout << "Result: " << std::endl;
+  std::cout << "[";
+  for (int i = 0; i < 1; i++) {
+    if (i > 0) std::cout << " ";
+    std::cout << "[";
+    for (int j = 0; j < 2; j++) {
+      if (j > 0) std::cout << " ";
+      std::cout << result[i * 2 + j];
+    }
+    std::cout << "]";
+    if (i < 3) std::cout << "\n ";
+  }
+  std::cout << "]";
+  std::cout << std::endl;
+
   const auto inferenceStart = std::chrono::high_resolution_clock::now();
 
   /// Execute forward inference of the model.
-  _mlir_ciface_forward(&result, &input1, &input2, &bias);
+  _mlir_ciface_forward(&result, &input2, &bias, &input1);
 
   const auto inferenceEnd = std::chrono::high_resolution_clock::now();
   const std::chrono::duration<double, std::milli> inferenceTime =
@@ -93,18 +116,58 @@ int main() {
 
   /// Print the output data for verification.
   std::cout << "\033[33;1m[Output] \033[0m";
+
+  std::cout << "Input1: " << std::endl;
+  for (int i = 0; i < 1; i++) {
+    for (int j = 0; j < 3; j++) {
+      std::cout << "\t" << input1[i * 3 + j] << " ";
+    }
+    std::cout << std::endl;
+  }
+
+  std::cout << "Input2: " << std::endl;
+  for (int i = 0; i < 2; i++) {
+    for (int j = 0; j < 3; j++) {
+      std::cout << "\t" << input2[i * 3 + j] << " ";
+    }
+    std::cout << std::endl;
+  }
+
+  std::cout << "Bias: " << std::endl;
+  for (int i = 0; i < 1; i++) {
+    for (int j = 0; j < 2; j++) {
+      std::cout << "\t" << bias[i * 2 + j] << " ";
+    }
+    std::cout << std::endl;
+  }
+
+  std::cout << "Result: " << std::endl;
   std::cout << "[";
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 1; i++) {
     if (i > 0) std::cout << " ";
     std::cout << "[";
-    for (int j = 0; j < 4; j++) {
+    for (int j = 0; j < 2; j++) {
       if (j > 0) std::cout << " ";
-      std::cout << result[i * 4 + j];
+      std::cout << result[i * 2 + j];
     }
     std::cout << "]";
     if (i < 3) std::cout << "\n ";
   }
-  std::cout << "]" << std::endl;
+  std::cout << "]";
+  std::cout << std::endl;
+
+  // std::cout << "[";
+  // for (int i = 0; i < 1; i++) {
+  //   if (i > 0) std::cout << " ";
+  //   std::cout << "[";
+  //   for (int j = 0; j < 2; j++) {
+  //     if (j > 0) std::cout << " ";
+  //     std::cout << result[i * 2 + j];
+  //   }
+  //   std::cout << "]";
+  //   if (i < 3) std::cout << "\n ";
+  // }
+  // std::cout << "]" << std::endl;
 
   /// Print the performance.
   std::cout << "\033[33;1m[Time] \033[0m";

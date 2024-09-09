@@ -24,14 +24,11 @@ import torch.nn as nn
 class AddMMModule(nn.Module):
     def __init__(self):
         super(AddMMModule, self).__init__()
+        self.linear_layer = nn.Linear(3, 2)
 
-    def forward(self, x, y, z):
-        print("x: "+str(x))
-        print("y: "+str(y))
-        print("z: "+str(z))
-        data = torch.ops.aten.addmm(z, x, y)
-        print("res: " + str(data))
-        return data.permute([1,0])
+    def forward(self, input):
+        res = self.linear_layer(input)
+        return res
 
 class TestModule(nn.Module):
     def __init__(self):
