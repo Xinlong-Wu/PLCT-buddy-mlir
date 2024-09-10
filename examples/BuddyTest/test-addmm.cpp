@@ -26,89 +26,79 @@
 using namespace buddy;
 
 extern "C" void
-_mlir_ciface_forward(MemRef<float, 2> *result, MemRef<float, 2> *input1,
-                     MemRef<float, 2> *input2, MemRef<float, 2> *bias);
+_mlir_ciface_forward(MemRef<float, 2> *result, MemRef<float, 2> *weight,
+                     MemRef<float, 1> *bias, MemRef<float, 4> *input);
+
+template <typename T, size_t D>
+void printVector(const MemRef<T, D> &memref, int level = 0){
+  if (level == D - 1) {
+      for (int i = 0; i < memref.sizes[level]; i++) {
+        std::cout << memref.data[i] << " ";
+      }
+      std::cout << std::endl;
+  } else {
+      for (int i = 0; i < memref.sizes[level]; i++) {
+        std::cout << "[";
+        printVector(memref, level + 1);
+        std::cout << "]";
+      }
+  }
+}
 
 int main() {
   /// Initialize data containers.
-  MemRef<float, 2> input1({1, 3});
-  MemRef<float, 2> input2({2, 3});
-  MemRef<float, 2> bias({1, 2});
-  MemRef<float, 2> result({1, 2});
+  MemRef<float, 4> input({1, 1, 16, 16});
+  MemRef<float, 2> weight({128, 256});
+  MemRef<float, 1> bias({128});
+  MemRef<float, 2> result({1, 128});
 
-  for (int i = 0; i < 1; i++) {
-    for (int j = 0; j < 3; j++) {
-      int index = i * 3 + j;
-      input1[index] = static_cast<float>(index + 1);
+  int rowNum = 16;
+  int colNum = 16;
+  for (int i = 0; i < rowNum; i++) {
+    for (int j = 0; j < colNum; j++) {
+      int index = i * colNum + j;
+      input[index] = static_cast<float>(index + 1);
     }
   }
 
-  for (int i = 0; i < 2; i++) {
-    for (int j = 0; j < 3; j++) {
-      int index = i * 3 + j;
-      input2[index] = static_cast<float>(j + 1);
+  rowNum = 128;
+  colNum = 256;
+  for (int i = 0; i < rowNum; i++) {
+    for (int j = 0; j < colNum; j++) {
+      int index = i * colNum + j;
+      weight[index] = static_cast<float>(j + 1);
     }
   }
 
-  for (int i = 0; i < 1; i++) {
-    for (int j = 0; j < 2; j++) {
-      int index = i * 2 + j;
+  rowNum = 1;
+  colNum = 128;
+  for (int i = 0; i < rowNum; i++) {
+    for (int j = 0; j < colNum; j++) {
+      int index = i * colNum + j;
       bias[index] = static_cast<float>(-1);
-    }
-  }
-
-  // init result
-  for (int i = 0; i < 1; i++) {
-    for (int j = 0; j < 2; j++) {
-      int index = i * 2 + j;
+      // init result
       result[index] = static_cast<float>(0);
     }
   }
 
   // Print the generated data to verify
-  std::cout << "Input1: " << std::endl;
-  for (int i = 0; i < 1; i++) {
-    for (int j = 0; j < 3; j++) {
-      std::cout << "\t" << input1[i * 3 + j] << " ";
-    }
-    std::cout << std::endl;
-  }
+  std::cout << "Input: " << std::endl;
+  printVector(input);
 
-  std::cout << "Input2: " << std::endl;
-  for (int i = 0; i < 2; i++) {
-    for (int j = 0; j < 3; j++) {
-      std::cout << "\t" << input2[i * 3 + j] << " ";
-    }
-    std::cout << std::endl;
-  }
+  std::cout << "Weight: " << std::endl;
+  printVector(weight);
 
   std::cout << "Bias: " << std::endl;
-  for (int i = 0; i < 1; i++) {
-    for (int j = 0; j < 2; j++) {
-      std::cout << "\t" << bias[i * 2 + j] << " ";
-    }
-    std::cout << std::endl;
-  }
+  printVector(bias);
 
   std::cout << "Result: " << std::endl;
-  std::cout << "[";
-  for (int i = 0; i < 1; i++) {
-    if (i > 0) std::cout << " ";
-    std::cout << "[";
-    for (int j = 0; j < 2; j++) {
-      if (j > 0) std::cout << " ";
-      std::cout << result[i * 2 + j];
-    }
-    std::cout << "]";
-    if (i < 3) std::cout << "\n ";
-  }
-  std::cout << "]";
+  printVector(result);
   std::cout << std::endl;
 
   const auto inferenceStart = std::chrono::high_resolution_clock::now();
 
   /// Execute forward inference of the model.
-  _mlir_ciface_forward(&result, &input2, &bias, &input1);
+  _mlir_ciface_forward(&result, &weight, &bias, &input);
 
   const auto inferenceEnd = std::chrono::high_resolution_clock::now();
   const std::chrono::duration<double, std::milli> inferenceTime =
@@ -117,57 +107,18 @@ int main() {
   /// Print the output data for verification.
   std::cout << "\033[33;1m[Output] \033[0m";
 
-  std::cout << "Input1: " << std::endl;
-  for (int i = 0; i < 1; i++) {
-    for (int j = 0; j < 3; j++) {
-      std::cout << "\t" << input1[i * 3 + j] << " ";
-    }
-    std::cout << std::endl;
-  }
+  std::cout << "Input: " << std::endl;
+  printVector(input);
 
-  std::cout << "Input2: " << std::endl;
-  for (int i = 0; i < 2; i++) {
-    for (int j = 0; j < 3; j++) {
-      std::cout << "\t" << input2[i * 3 + j] << " ";
-    }
-    std::cout << std::endl;
-  }
+  std::cout << "Weight: " << std::endl;
+  printVector(weight);
 
   std::cout << "Bias: " << std::endl;
-  for (int i = 0; i < 1; i++) {
-    for (int j = 0; j < 2; j++) {
-      std::cout << "\t" << bias[i * 2 + j] << " ";
-    }
-    std::cout << std::endl;
-  }
+  printVector(bias);
 
   std::cout << "Result: " << std::endl;
-  std::cout << "[";
-  for (int i = 0; i < 1; i++) {
-    if (i > 0) std::cout << " ";
-    std::cout << "[";
-    for (int j = 0; j < 2; j++) {
-      if (j > 0) std::cout << " ";
-      std::cout << result[i * 2 + j];
-    }
-    std::cout << "]";
-    if (i < 3) std::cout << "\n ";
-  }
-  std::cout << "]";
+  printVector(result);
   std::cout << std::endl;
-
-  // std::cout << "[";
-  // for (int i = 0; i < 1; i++) {
-  //   if (i > 0) std::cout << " ";
-  //   std::cout << "[";
-  //   for (int j = 0; j < 2; j++) {
-  //     if (j > 0) std::cout << " ";
-  //     std::cout << result[i * 2 + j];
-  //   }
-  //   std::cout << "]";
-  //   if (i < 3) std::cout << "\n ";
-  // }
-  // std::cout << "]" << std::endl;
 
   /// Print the performance.
   std::cout << "\033[33;1m[Time] \033[0m";
