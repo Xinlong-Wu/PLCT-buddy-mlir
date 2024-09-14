@@ -15,7 +15,7 @@ dynamo_compiler = DynamoCompiler(
     aot_autograd_decomposition=inductor_decomp,
 )
 
-input_data = torch.randn(1,256)  
+input_data = torch.randn(4,2)  
 # print(type(input_data))
 
 with torch.no_grad():

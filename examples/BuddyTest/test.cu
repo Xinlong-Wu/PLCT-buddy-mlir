@@ -29,14 +29,15 @@ __global__ void addmm_kernel(float* mat1, float* mat2, float* bias, float* resul
         int col = idx % n;
 
         if (row < m){
-            printf("BlockDim.x: %d, BlockId.x: %d, TreadId.x: %d, row = %d, col = %d\n", blockDim.x, blockIdx.x, threadIdx.x, row, col);
+            // printf("BlockDim.x: %d, BlockId.x: %d, TreadId.x: %d, row = %d, col = %d\n", blockDim.x, blockIdx.x, threadIdx.x, row, col);
             float sum = 0.0f;
 
             // Mat mul
             for (int l = 0; l < k; l++) {
                 sum += mat1[row * k + l] * mat2[l * n + col];
             }
-            result[row * n + col] = sum + bias[row * n + col];
+            result[row * n + col] = sum + bias[col];
+
         }
     }
 }
@@ -81,23 +82,18 @@ int main() {
 
     // 初始化矩阵（此处省略初始化代码）
     float h_mat1[4 * 2] = {
-        0, 9,
-        1, 2,
-        3, 4,
-        5, 6
+        1.0f, 2.0f,
+        1.0f, 2.0f,
+        1.0f, 2.0f,
+        1.0f, 2.0f
     };
 
     float h_mat2[2 * 4] = {
-        1, 2, 3, 4,
-        1, 2, 3, 4
+        1.0f, 1.0f, 1.0f, 1.0f,
+        2.0f, 2.0f, 2.0f, 2.0f
     };
 
-    float h_bias[4 * 4] = {
-        1, 1, 1, 1,
-        1, 1, 1, 1,
-        1, 1, 1, 1,
-        1, 1, 1, 1
-    };
+    float h_bias[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
 
     float h_result[4 * 4] = {-1};
 
@@ -119,7 +115,7 @@ int main() {
     cudaMemcpy(d_bias, h_bias, bias_size, cudaMemcpyHostToDevice);
 
     dim3 gridSize(1,1);
-    dim3 blockSize(2, 1);
+    dim3 blockSize(1, 1);
 
     addmm_kernel<<<gridSize, blockSize>>>(d_mat1, d_mat2, d_bias, d_result, m, n, k);
 

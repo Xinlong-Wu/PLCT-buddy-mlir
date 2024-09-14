@@ -126,14 +126,15 @@ def addmm_op(
     input_data = symbol_table.get((str(node.args[1]), 0), node.args[1])
     weight = symbol_table.get((str(node.args[2]), 0), node.args[2])
     bias = symbol_table.get((str(node.args[0]), 0), node.args[0])
+    output_shape = list(node.tensor_meta["shape"])
+    output = memref.AllocOp(ir.MemRefType.get(output_shape, element_type), [], [])
     # print("input_data: "+str(input_data))
     # print("weight: "+str(weight))
     # print("bias: "+str(bias))
 
     # TODO: Transpose of the mat2 before multiplication to optimize the cache hit rate
-
-    output_shape = list(node.tensor_meta["shape"])
     input_shape = input_data.type.shape
+    bias_shape = bias.type.shape
     weight_shape = weight.type.shape
     # print("output_shape: "+str(output_shape))
     # print("output_shape: "+str())
@@ -144,6 +145,7 @@ def addmm_op(
     # Flatten the input into a one-dimensional format 
     input_size = tensor_shape_size(input_shape)
     weight_size = tensor_shape_size(weight_shape)
+    bias_size = tensor_shape_size(bias_shape)
     output_size = tensor_shape_size(output_shape)
     # print("input_size: "+str(input_size))
     # print("weight_size: "+str(weight_size))
@@ -151,6 +153,7 @@ def addmm_op(
 
     input_size_c = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), input_size))
     weight_size_c = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), weight_size))
+    bias_size_c = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), bias_size))
     output_size_c = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), output_size))
     # print("input_size_c: "+str(input_size_c))
     # print("weight_size_c: "+str(weight_size_c))
@@ -159,18 +162,20 @@ def addmm_op(
     input_shape_1d = memref.AllocOp(ir.MemRefType.get([1], ir.IndexType.get()), [], [])
     weight_shape_1d = memref.AllocOp(ir.MemRefType.get([1], ir.IndexType.get()), [], [])
     bias_shape_1d = memref.AllocOp(ir.MemRefType.get([1], ir.IndexType.get()), [], [])
+    output_shape_1d = memref.AllocOp(ir.MemRefType.get([1], ir.IndexType.get()), [], [])
     # print("input_shape_1d: "+str(input_shape_1d))
     # print("weight_shape_1d: "+str(weight_shape_1d))
     # print("bias_shape_1d: "+str(bias_shape_1d))
 
     memref.StoreOp(input_size_c, input_shape_1d, [c0])
     memref.StoreOp(weight_size_c, weight_shape_1d, [c0])
-    memref.StoreOp(output_size_c, bias_shape_1d, [c0])
+    memref.StoreOp(bias_size_c, bias_shape_1d, [c0])
+    memref.StoreOp(output_size_c, output_shape_1d, [c0])
 
     input_reshape_type = ir.MemRefType.get([input_size], element_type)
     weight_reshape_type = ir.MemRefType.get([weight_size], element_type)
-    bias_reshape_type = ir.MemRefType.get([output_size], element_type)
-    output_type = ir.MemRefType.get(output_shape, element_type)
+    bias_reshape_type = ir.MemRefType.get([bias_size], element_type)
+    output_reshape_type = ir.MemRefType.get([output_size], element_type)
     # print("input_reshape_type: "+str(input_reshape_type))
     # print("weight_reshape_type: "+str(weight_reshape_type))
     # print("bias_reshape_type: "+str(bias_reshape_type))
@@ -179,15 +184,16 @@ def addmm_op(
     input_reshape_1d = memref.ReshapeOp(input_reshape_type, input_data, input_shape_1d)
     weight_reshape_1d = memref.ReshapeOp(weight_reshape_type, weight, weight_shape_1d)
     bias_reshape_1d = memref.ReshapeOp(bias_reshape_type, bias, bias_shape_1d)
+    output_reshape_1d = memref.ReshapeOp(output_reshape_type, output, output_shape_1d)
     # print("input_reshape: "+str(input_reshape_1d))
     # print("weight_reshape: "+str(weight_reshape_1d))
     # print("bias_reshape: "+str(bias_reshape_1d))
-
 
     unranked_memref_type = ir.UnrankedMemRefType.get(element_type, ir.IntegerAttr.get(ir.IndexType.get(), 0))
     gpu.HostRegisterOp(memref.CastOp(unranked_memref_type, input_reshape_1d))
     gpu.HostRegisterOp(memref.CastOp(unranked_memref_type, weight_reshape_1d))
     gpu.HostRegisterOp(memref.CastOp(unranked_memref_type, bias_reshape_1d))
+    gpu.HostRegisterOp(memref.CastOp(unranked_memref_type, output_reshape_1d))
 
     row = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), input_shape[0]))
     col = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), weight_shape[1]))
@@ -256,34 +262,12 @@ def addmm_op(
                     scf.YieldOp([res])
                 
                 sum = mul_loop.result
-                bias_load = memref.LoadOp(bias_reshape_1d, [arith.AddIOp(arith.MulIOp(t_row, col).result, t_col)])
+                bias_load = memref.LoadOp(bias_reshape_1d, [t_col])
                 res = arith.AddFOp(sum, bias_load)
-                memref.StoreOp(res, bias_reshape_1d, [arith.AddIOp(arith.MulIOp(t_row, col).result, t_col)])
+                memref.StoreOp(res, output_reshape_1d, [arith.AddIOp(arith.MulIOp(t_row, col), t_col)])
                 scf.YieldOp([])
             scf.YieldOp([])
         gpu.TerminatorOp()
-
-
-    output = memref.AllocOp(ir.MemRefType.get(output_shape, element_type), [], [])
-
-    # FIXME: Dialect `memref' not found for custom op 'memref.expand_shape' 
-    # axis = ir.ArrayAttr.get(
-    #     [
-    #         ir.IntegerAttr.get(ir.IntegerType.get_signless(64), i)
-    #         for i in range(len(output_shape))
-    #     ],
-    #     None,
-    # )
-    # axis = ir.ArrayAttr.get([axis], None)
-    # bias_reshape = memref.ExpandShapeOp(output_type, bias, axis)
-
-    bias_shape = memref.AllocOp(ir.MemRefType.get([len(output_shape)], ir.IndexType.get()), [], [])
-    # print("bias_shape: "+str(bias_shape))
-    for i in range(len(output_shape)):
-        memref.StoreOp(arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), output_shape[i])), bias_shape, [arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), i))])
-
-    bias_reshape = memref.ReshapeOp(output_type, bias, bias_shape)
-    memref.CopyOp(bias_reshape, output)
     return output
 
 # TODO: Implement Reshape Operation on GPU in future revisions.

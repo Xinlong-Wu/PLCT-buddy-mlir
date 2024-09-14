@@ -24,11 +24,11 @@ import torch.nn as nn
 class AddMMModule(nn.Module):
     def __init__(self):
         super(AddMMModule, self).__init__()
-        self.linear_layer = nn.Linear(in_features=256, out_features=128)
+        self.linear_layer = nn.Linear(in_features=2, out_features=4)
 
     def forward(self, input):
-        x_flat = torch.flatten(input, start_dim=1)
-        res = self.linear_layer(x_flat)
+        # x_flat = torch.flatten(input, start_dim=1)
+        res = self.linear_layer(input)
         return res
 
 class TestModule(nn.Module):

@@ -27,7 +27,7 @@ using namespace buddy;
 
 extern "C" void
 _mlir_ciface_forward(MemRef<float, 2> *result, MemRef<float, 2> *weight,
-                     MemRef<float, 1> *bias, MemRef<float, 4> *input);
+                     MemRef<float, 1> *bias, MemRef<float, 2> *input);
 
 template <typename T, size_t D>
 void printVector(MemRef<T, D> &memref, int level = 0) {
@@ -35,25 +35,24 @@ void printVector(MemRef<T, D> &memref, int level = 0) {
       for (int i = 0; i < memref.getSizes()[level]; i++) {
         std::cout << memref.getData()[i] << " ";
       }
-      std::cout << std::endl;
   } else {
       for (int i = 0; i < memref.getSizes()[level]; i++) {
         std::cout << "[";
         printVector(memref, level + 1);
-        std::cout << "]";
+        std::cout << "]" << std::endl;
       }
   }
 }
 
 int main() {
   /// Initialize data containers.
-  MemRef<float, 4> input({1, 1, 16, 16});
-  MemRef<float, 2> weight({128, 256});
-  MemRef<float, 1> bias({128});
-  MemRef<float, 2> result({1, 128});
+  MemRef<float, 2> input({4,2});
+  MemRef<float, 2> weight({4,2});
+  MemRef<float, 1> bias({4});
+  MemRef<float, 2> result({4,4});
 
-  int rowNum = 16;
-  int colNum = 16;
+  int rowNum = 4;
+  int colNum = 2;
   for (int i = 0; i < rowNum; i++) {
     for (int j = 0; j < colNum; j++) {
       int index = i * colNum + j;
@@ -61,21 +60,21 @@ int main() {
     }
   }
 
-  rowNum = 128;
-  colNum = 256;
+  rowNum = 4;
+  colNum = 2;
   for (int i = 0; i < rowNum; i++) {
     for (int j = 0; j < colNum; j++) {
       int index = i * colNum + j;
-      weight[index] = static_cast<float>(j + 1);
+      weight[index] = static_cast<float>(index + 1);
     }
   }
 
   rowNum = 1;
-  colNum = 128;
+  colNum = 4;
   for (int i = 0; i < rowNum; i++) {
     for (int j = 0; j < colNum; j++) {
       int index = i * colNum + j;
-      bias[index] = static_cast<float>(-1);
+      bias[index] = static_cast<float>(0);
       // init result
       result[index] = static_cast<float>(0);
     }
@@ -83,17 +82,37 @@ int main() {
 
   // Print the generated data to verify
   std::cout << "Input: " << std::endl;
-  printVector(input);
+  rowNum = 4;
+  colNum = 2;
+  for (int i = 0; i < rowNum; i++) {
+    for (int j = 0; j < colNum; j++) {
+      int index = i * colNum + j;
+      std::cout << input[index] << " ";
+    }
+    std::cout << std::endl;
+  }
 
   std::cout << "Weight: " << std::endl;
-  printVector(weight);
+  rowNum = 4;
+  colNum = 2;
+  for (int i = 0; i < rowNum; i++) {
+    for (int j = 0; j < colNum; j++) {
+      int index = i * colNum + j;
+      std::cout << weight[index] << " ";
+    }
+    std::cout << std::endl;
+  }
 
   std::cout << "Bias: " << std::endl;
-  printVector(bias);
-
-  std::cout << "Result: " << std::endl;
-  printVector(result);
-  std::cout << std::endl;
+  rowNum = 1;
+  colNum = 4;
+  for (int i = 0; i < rowNum; i++) {
+    for (int j = 0; j < colNum; j++) {
+      int index = i * colNum + j;
+      std::cout << bias[index] << " ";
+    }
+    std::cout << std::endl;
+  }
 
   const auto inferenceStart = std::chrono::high_resolution_clock::now();
 
@@ -107,17 +126,16 @@ int main() {
   /// Print the output data for verification.
   std::cout << "\033[33;1m[Output] \033[0m";
 
-  std::cout << "Input: " << std::endl;
-  printVector(input);
-
-  std::cout << "Weight: " << std::endl;
-  printVector(weight);
-
-  std::cout << "Bias: " << std::endl;
-  printVector(bias);
-
   std::cout << "Result: " << std::endl;
-  printVector(result);
+  rowNum = 4;
+  colNum = 4;
+  for (int i = 0; i < rowNum; i++) {
+    for (int j = 0; j < colNum; j++) {
+      int index = i * colNum + j;
+      std::cout << result[index] << " ";
+    }
+    std::cout << std::endl;
+  }
   std::cout << std::endl;
 
   /// Print the performance.
