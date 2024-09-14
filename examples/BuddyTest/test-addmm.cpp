@@ -30,14 +30,14 @@ _mlir_ciface_forward(MemRef<float, 2> *result, MemRef<float, 2> *weight,
                      MemRef<float, 1> *bias, MemRef<float, 4> *input);
 
 template <typename T, size_t D>
-void printVector(const MemRef<T, D> &memref, int level = 0){
+void printVector(MemRef<T, D> &memref, int level = 0) {
   if (level == D - 1) {
-      for (int i = 0; i < memref.sizes[level]; i++) {
-        std::cout << memref.data[i] << " ";
+      for (int i = 0; i < memref.getSizes()[level]; i++) {
+        std::cout << memref.getData()[i] << " ";
       }
       std::cout << std::endl;
   } else {
-      for (int i = 0; i < memref.sizes[level]; i++) {
+      for (int i = 0; i < memref.getSizes()[level]; i++) {
         std::cout << "[";
         printVector(memref, level + 1);
         std::cout << "]";

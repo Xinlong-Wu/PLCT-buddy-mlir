@@ -196,35 +196,49 @@ def addmm_op(
     gpu_kernel = gpu.LaunchOp(
         asyncToken=None,
         asyncDependencies=[],
-        gridSizeX=c1.result, gridSizeY=c1.result, gridSizeZ=c1.result,
-        blockSizeX=kernels.result, blockSizeY=c1.result, blockSizeZ=c1.result,
+        gridSizeX=c1.result, 
+        gridSizeY=c1.result, 
+        gridSizeZ=c1.result,
+        blockSizeX=kernels.result, 
+        blockSizeY=c1.result, 
+        blockSizeZ=c1.result,
     )
     gpu_kernel_block = ir.Block.create_at_start(
         gpu_kernel.body,
         [
-            ir.IndexType.get(), ir.IndexType.get(), ir.IndexType.get(),     # block_idx, block_idy, block_idz
-            ir.IndexType.get(), ir.IndexType.get(), ir.IndexType.get(),     # thread_idx , thread_idy, thread_idz
-            ir.IndexType.get(), ir.IndexType.get(), ir.IndexType.get(),     # grid_size x, grid_size y, grid_size z
-            ir.IndexType.get(), ir.IndexType.get(), ir.IndexType.get(),     # block_size x, block_size y, block_size z
+            ir.IndexType.get(),     # block_id x
+            ir.IndexType.get(),     # block_id y 
+            ir.IndexType.get(),     # block_id z 
+            ir.IndexType.get(),     # thread_id x
+            ir.IndexType.get(),     # thread_id y  
+            ir.IndexType.get(),     # thread_id z
+            ir.IndexType.get(),     # grid_size x
+            ir.IndexType.get(),     # grid_size y
+            ir.IndexType.get(),     # grid_size z
+            ir.IndexType.get(),     # block_size x
+            ir.IndexType.get(),     # block_size y
+            ir.IndexType.get(),     # block_size z
         ]
     )
 
-    # TODO: optimize to one dimension
     with ir.InsertionPoint(gpu_kernel_block):
         tIdX = gpu_kernel_block.arguments[3]
-        tIdY = gpu_kernel_block.arguments[4]
         otter_loop = scf.ForOp(
             lower_bound=tIdX,
-            upper_bound=row,
+            upper_bound=arith.ConstantOp(ir.IndexType.get(), output_size).result,
             step=gpu_kernel.blockSizeX
         )
         with ir.InsertionPoint(otter_loop.body):
-            inner_loop = scf.ForOp(
-                lower_bound=tIdY,
-                upper_bound=col,
-                step=gpu_kernel.blockSizeY
-            )
-            with ir.InsertionPoint(inner_loop.body):
+            iter_idx = otter_loop.induction_variable
+            t_col = arith.divui(iter_idx, col)
+            t_row = arith.remui(iter_idx, col)
+
+            ult = 6
+
+            isRowInM = arith.cmpi(ult, t_row, row)
+
+            branch0 = scf.IfOp(isRowInM)
+            with ir.InsertionPoint(branch0.then_block):
                 initial_sum = arith.ConstantOp(ir.F32Type.get(), ir.FloatAttr.get(ir.F32Type.get(), 0.0))
 
                 mul_loop = scf.ForOp(
@@ -235,16 +249,16 @@ def addmm_op(
                 )
                 with ir.InsertionPoint(mul_loop.body):
                     sum = mul_loop.inner_iter_args[0]
-                    mat1_load = memref.LoadOp(input_reshape_1d, [arith.AddIOp(arith.MulIOp(otter_loop.induction_variable, inner_dim).result, mul_loop.induction_variable)])
-                    mat2_load = memref.LoadOp(weight_reshape_1d, [arith.AddIOp(arith.MulIOp(mul_loop.induction_variable, col).result, inner_loop.induction_variable)])
-                    res = arith.MulFOp(mat1_load, mat2_load)
+                    input_load = memref.LoadOp(input_reshape_1d, [arith.AddIOp(arith.MulIOp(t_row, inner_dim).result, mul_loop.induction_variable)])
+                    weight_load = memref.LoadOp(weight_reshape_1d, [arith.AddIOp(arith.MulIOp(mul_loop.induction_variable, col).result, t_col)])
+                    res = arith.MulFOp(input_load, weight_load)
                     res = arith.AddFOp(sum, res)
                     scf.YieldOp([res])
                 
                 sum = mul_loop.result
-                bias_load = memref.LoadOp(bias_reshape_1d, [arith.AddIOp(arith.MulIOp(otter_loop.induction_variable, col).result, inner_loop.induction_variable)])
+                bias_load = memref.LoadOp(bias_reshape_1d, [arith.AddIOp(arith.MulIOp(t_row, col).result, t_col)])
                 res = arith.AddFOp(sum, bias_load)
-                memref.StoreOp(res, bias_reshape_1d, [arith.AddIOp(arith.MulIOp(otter_loop.induction_variable, col).result, inner_loop.induction_variable)])
+                memref.StoreOp(res, bias_reshape_1d, [arith.AddIOp(arith.MulIOp(t_row, col).result, t_col)])
                 scf.YieldOp([])
             scf.YieldOp([])
         gpu.TerminatorOp()

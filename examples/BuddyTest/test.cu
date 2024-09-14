@@ -1,9 +1,14 @@
 #include <cuda_runtime.h>
 #include <cstdio>
 
+#define TASK_ITEM
+
+#ifdef TASK_COLUMN
+// Each threade calc one Column
 __global__ void addmm_kernel(float* mat1, float* mat2, float* bias, float* result, int m, int n, int k) {
     for (int i = threadIdx.x; i < m; i += blockDim.x) {
         for (int j = threadIdx.y; j < n; j += blockDim.y) {
+            printf("BlockDim.x: %d, BlockId.x: %d, TreadId.x: %d, i = %d, j = %d\n", blockDim.x, blockIdx.x, threadIdx.x, i, j);
             float sum = 0.0f;
 
             // Mat mul
@@ -16,6 +21,53 @@ __global__ void addmm_kernel(float* mat1, float* mat2, float* bias, float* resul
         }
     }
 }
+#elif defined(TASK_ITEM)
+// Each threade calc one Item
+__global__ void addmm_kernel(float* mat1, float* mat2, float* bias, float* result, int m, int n, int k) {
+    for (int idx = threadIdx.x; idx < m*n; idx += blockDim.x){
+        int row = idx / n;
+        int col = idx % n;
+
+        if (row < m){
+            printf("BlockDim.x: %d, BlockId.x: %d, TreadId.x: %d, row = %d, col = %d\n", blockDim.x, blockIdx.x, threadIdx.x, row, col);
+            float sum = 0.0f;
+
+            // Mat mul
+            for (int l = 0; l < k; l++) {
+                sum += mat1[row * k + l] * mat2[l * n + col];
+            }
+            result[row * n + col] = sum + bias[row * n + col];
+        }
+    }
+}
+#endif
+
+// __global__ void addmm_kernel(float* mat1, float* mat2, float* mat2T, float* bias, float* result, int m, int n, int k) {
+//     // transpos 
+//     int row = blockIdx.y * blockDim.y + threadIdx.y;
+//     int col = blockIdx.x * blockDim.x + threadIdx.x;
+//     if (row < k && col < n) {
+//         // 将mat2中的元素转置到mat2T中
+//         mat2T[col * k + row] = mat2[row * n + col];
+//     }
+
+//     // 同步所有线程，确保转置完成
+//     __syncthreads();
+
+//     for (int i = threadIdx.x; i < m; i += blockDim.x) {
+//         for (int j = threadIdx.y; j < n; j += blockDim.y) {
+//             float sum = 0.0f;
+
+//             // Mat mul
+//             for (int l = 0; l < k; l++) {
+//                 sum += mat1[i * k + l] * mat2[l * n + j];
+//             }
+
+//             // add bias
+//             result[i * n + j] = sum + bias[i];
+//         }
+//     }
+// }
 
 int main() {
     int m = 4; // row
@@ -52,11 +104,13 @@ int main() {
 
     float* d_mat1;
     float* d_mat2;
+    // float* d_mat2T;
     float* d_bias;
     float* d_result;
 
     cudaMalloc(&d_mat1, mat1_size);
     cudaMalloc(&d_mat2, mat2_size);
+    // cudaMalloc(&d_mat2T, mat2_size);
     cudaMalloc(&d_bias, bias_size);
     cudaMalloc(&d_result, result_size);
 
@@ -64,10 +118,10 @@ int main() {
     cudaMemcpy(d_mat2, h_mat2, mat2_size, cudaMemcpyHostToDevice);
     cudaMemcpy(d_bias, h_bias, bias_size, cudaMemcpyHostToDevice);
 
-    dim3 threadsPerBlock(16, 16);
-    dim3 numBlocks((n + threadsPerBlock.x - 1) / threadsPerBlock.x, (m + threadsPerBlock.y - 1) / threadsPerBlock.y);
+    dim3 gridSize(1,1);
+    dim3 blockSize(2, 1);
 
-    addmm_kernel<<<128, 1, 1>>>(d_mat1, d_mat2, d_bias, d_result, m, n, k);
+    addmm_kernel<<<gridSize, blockSize>>>(d_mat1, d_mat2, d_bias, d_result, m, n, k);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

@@ -4,6 +4,7 @@ MLIR_OPT := ../../llvm/build/bin/mlir-opt
 MLIR_TRANSLATE := ../../llvm/build/bin/mlir-translate
 MLIR_CPU_RUNNER := ../../llvm/build/bin/mlir-cpu-runner
 LLC := ../../llvm/build/bin/llc
+LLVM_BIN := ../../llvm/build/bin
 OPT_FLAG := -O0
 
 ifeq ($(shell uname),Linux)
@@ -26,10 +27,11 @@ gpu-addmm-lower:
 	${MLIR_OPT} -o log.mlir
 
 gpu-addmm-translate:
-	@${MLIR_OPT} addmm.mlir -gpu-kernel-outlining -llvm-request-c-wrappers | \
-	${MLIR_OPT} -pass-pipeline="builtin.module(nvvm-attach-target{chip=sm_70 O=3},\
-	gpu.module(convert-scf-to-cf, convert-gpu-to-nvvm, convert-arith-to-llvm), convert-scf-to-cf, gpu-to-llvm, gpu-module-to-binary)" | \
-	${MLIR_TRANSLATE} -mlir-to-llvmir -o log.ll
+	${MLIR_OPT} addmm.mlir -gpu-kernel-outlining -llvm-request-c-wrappers -convert-vector-to-scf -convert-vector-to-llvm | \
+	${MLIR_OPT} -pass-pipeline "builtin.module(nvvm-attach-target{chip=sm_75 O=3},  gpu.module(convert-scf-to-cf, convert-gpu-to-nvvm, convert-arith-to-llvm), convert-scf-to-cf, gpu-to-llvm, reconcile-unrealized-casts, gpu-module-to-binary)" | \
+	${MLIR_TRANSLATE} -mlir-to-llvmir | \
+	${LLVM_BIN}/llvm-as | \
+	${LLC} -time-passes -filetype=obj  -relocation-model=pic -O3 -o addmm.o
 
 gpu-addmm-run:
 	@${MLIR_OPT} addmm.mlir -gpu-kernel-outlining -llvm-request-c-wrappers | \
