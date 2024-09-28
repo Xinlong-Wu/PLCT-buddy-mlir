@@ -25,6 +25,7 @@ from mlir.dialects import gpu, memref, arith, scf, vector
 
 from ..graph import TensorDType
 from ..graph import (
+    AddMMOp,
     ReluOp,
     ReshapeOp,
     PermuteOp,
@@ -111,6 +112,163 @@ def relu_op(node: ReluOp, symbol_table: Dict[Tuple[str, int], ir.Operation]):
     memref.CopyOp(input, output)
     return output
 
+def addmm_op(
+    node: AddMMOp, symbol_table: Dict[Tuple[str, int], ir.Operation]
+):
+    dtype = node.tensor_meta["dtype"]
+    element_type = mlir_element_type_get(dtype)
+    c0 = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), 0))
+    c1 = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), 1))
+    kernels = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), 512))
+
+    # TODO: Reverse the order of the mat2 before multiplication to optimize the cache hit rate
+
+    input_data = symbol_table.get((str(node.args[1]), 0), node.args[1])
+    weight = symbol_table.get((str(node.args[2]), 0), node.args[2])
+    bias = symbol_table.get((str(node.args[0]), 0), node.args[0])
+    output_shape = list(node.tensor_meta["shape"])
+    output = memref.AllocOp(ir.MemRefType.get(output_shape, element_type), [], [])
+    # print("input_data: "+str(input_data))
+    # print("weight: "+str(weight))
+    # print("bias: "+str(bias))
+
+    # TODO: Transpose of the mat2 before multiplication to optimize the cache hit rate
+    input_shape = input_data.type.shape
+    bias_shape = bias.type.shape
+    weight_shape = weight.type.shape
+    # print("output_shape: "+str(output_shape))
+    # print("output_shape: "+str())
+    # print("input_shape: "+str(input_shape))
+    # print("weight_shape: "+str(weight_shape))
+    # print("bias shape: "+str(bias.type.shape))
+
+    # Flatten the input into a one-dimensional format 
+    input_size = tensor_shape_size(input_shape)
+    weight_size = tensor_shape_size(weight_shape)
+    bias_size = tensor_shape_size(bias_shape)
+    output_size = tensor_shape_size(output_shape)
+    # print("input_size: "+str(input_size))
+    # print("weight_size: "+str(weight_size))
+    # print("output_size: "+str(output_size))
+
+    input_size_c = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), input_size))
+    weight_size_c = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), weight_size))
+    bias_size_c = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), bias_size))
+    output_size_c = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), output_size))
+    # print("input_size_c: "+str(input_size_c))
+    # print("weight_size_c: "+str(weight_size_c))
+    # print("output_size_c: "+str(output_size_c))
+
+    input_shape_1d = memref.AllocOp(ir.MemRefType.get([1], ir.IndexType.get()), [], [])
+    weight_shape_1d = memref.AllocOp(ir.MemRefType.get([1], ir.IndexType.get()), [], [])
+    bias_shape_1d = memref.AllocOp(ir.MemRefType.get([1], ir.IndexType.get()), [], [])
+    output_shape_1d = memref.AllocOp(ir.MemRefType.get([1], ir.IndexType.get()), [], [])
+    # print("input_shape_1d: "+str(input_shape_1d))
+    # print("weight_shape_1d: "+str(weight_shape_1d))
+    # print("bias_shape_1d: "+str(bias_shape_1d))
+
+    memref.StoreOp(input_size_c, input_shape_1d, [c0])
+    memref.StoreOp(weight_size_c, weight_shape_1d, [c0])
+    memref.StoreOp(bias_size_c, bias_shape_1d, [c0])
+    memref.StoreOp(output_size_c, output_shape_1d, [c0])
+
+    input_reshape_type = ir.MemRefType.get([input_size], element_type)
+    weight_reshape_type = ir.MemRefType.get([weight_size], element_type)
+    bias_reshape_type = ir.MemRefType.get([bias_size], element_type)
+    output_reshape_type = ir.MemRefType.get([output_size], element_type)
+    # print("input_reshape_type: "+str(input_reshape_type))
+    # print("weight_reshape_type: "+str(weight_reshape_type))
+    # print("bias_reshape_type: "+str(bias_reshape_type))
+    # print("output_type: "+str(output_type))
+
+    input_reshape_1d = memref.ReshapeOp(input_reshape_type, input_data, input_shape_1d)
+    weight_reshape_1d = memref.ReshapeOp(weight_reshape_type, weight, weight_shape_1d)
+    bias_reshape_1d = memref.ReshapeOp(bias_reshape_type, bias, bias_shape_1d)
+    output_reshape_1d = memref.ReshapeOp(output_reshape_type, output, output_shape_1d)
+    # print("input_reshape: "+str(input_reshape_1d))
+    # print("weight_reshape: "+str(weight_reshape_1d))
+    # print("bias_reshape: "+str(bias_reshape_1d))
+
+    unranked_memref_type = ir.UnrankedMemRefType.get(element_type, ir.IntegerAttr.get(ir.IndexType.get(), 0))
+    gpu.HostRegisterOp(memref.CastOp(unranked_memref_type, input_reshape_1d))
+    gpu.HostRegisterOp(memref.CastOp(unranked_memref_type, weight_reshape_1d))
+    gpu.HostRegisterOp(memref.CastOp(unranked_memref_type, bias_reshape_1d))
+    gpu.HostRegisterOp(memref.CastOp(unranked_memref_type, output_reshape_1d))
+
+    row = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), input_shape[0]))
+    col = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), weight_shape[1]))
+    inner_dim = arith.ConstantOp(ir.IndexType.get(), ir.IntegerAttr.get(ir.IndexType.get(), input_shape[1]))
+
+    gpu_kernel = gpu.LaunchOp(
+        asyncToken=None,
+        asyncDependencies=[],
+        gridSizeX=c1.result, 
+        gridSizeY=c1.result, 
+        gridSizeZ=c1.result,
+        blockSizeX=kernels.result, 
+        blockSizeY=c1.result, 
+        blockSizeZ=c1.result,
+    )
+    gpu_kernel_block = ir.Block.create_at_start(
+        gpu_kernel.body,
+        [
+            ir.IndexType.get(),     # block_id x
+            ir.IndexType.get(),     # block_id y 
+            ir.IndexType.get(),     # block_id z 
+            ir.IndexType.get(),     # thread_id x
+            ir.IndexType.get(),     # thread_id y  
+            ir.IndexType.get(),     # thread_id z
+            ir.IndexType.get(),     # grid_size x
+            ir.IndexType.get(),     # grid_size y
+            ir.IndexType.get(),     # grid_size z
+            ir.IndexType.get(),     # block_size x
+            ir.IndexType.get(),     # block_size y
+            ir.IndexType.get(),     # block_size z
+        ]
+    )
+
+    with ir.InsertionPoint(gpu_kernel_block):
+        tIdX = gpu_kernel_block.arguments[3]
+        otter_loop = scf.ForOp(
+            lower_bound=tIdX,
+            upper_bound=arith.ConstantOp(ir.IndexType.get(), output_size).result,
+            step=gpu_kernel.blockSizeX
+        )
+        with ir.InsertionPoint(otter_loop.body):
+            iter_idx = otter_loop.induction_variable
+            t_col = arith.divui(iter_idx, col)
+            t_row = arith.remui(iter_idx, col)
+
+            ult = 6
+
+            isRowInM = arith.cmpi(ult, t_row, row)
+
+            branch0 = scf.IfOp(isRowInM)
+            with ir.InsertionPoint(branch0.then_block):
+                initial_sum = arith.ConstantOp(ir.F32Type.get(), ir.FloatAttr.get(ir.F32Type.get(), 0.0))
+
+                mul_loop = scf.ForOp(
+                    lower_bound=c0.result,
+                    upper_bound=inner_dim,
+                    step=c1.result,
+                    iter_args=[initial_sum]
+                )
+                with ir.InsertionPoint(mul_loop.body):
+                    sum = mul_loop.inner_iter_args[0]
+                    input_load = memref.LoadOp(input_reshape_1d, [arith.AddIOp(arith.MulIOp(t_row, inner_dim).result, mul_loop.induction_variable)])
+                    weight_load = memref.LoadOp(weight_reshape_1d, [arith.AddIOp(arith.MulIOp(mul_loop.induction_variable, col).result, t_col)])
+                    res = arith.MulFOp(input_load, weight_load)
+                    res = arith.AddFOp(sum, res)
+                    scf.YieldOp([res])
+                
+                sum = mul_loop.result
+                bias_load = memref.LoadOp(bias_reshape_1d, [t_col])
+                res = arith.AddFOp(sum, bias_load)
+                memref.StoreOp(res, output_reshape_1d, [arith.AddIOp(arith.MulIOp(t_row, col), t_col)])
+                scf.YieldOp([])
+            scf.YieldOp([])
+        gpu.TerminatorOp()
+    return output
 
 # TODO: Implement Reshape Operation on GPU in future revisions.
 def reshape_op(node: ReshapeOp, symbol_table):
@@ -546,6 +704,7 @@ def maxpool2d_op(node: MaxPool2dOp, symbol_table):
 
 
 ops_registry = {
+    "AddMMOp": addmm_op,
     "ReluOp": relu_op,
     "ViewOp": reshape_op,
     "PermuteOp": permute_op,
