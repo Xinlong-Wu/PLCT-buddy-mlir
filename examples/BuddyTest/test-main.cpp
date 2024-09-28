@@ -34,17 +34,17 @@ int main() {
   /// Initialize data containers.
   const int N = 1;
   const int C = 1;
-  const int K = 1;
+  const int K = 128;
   const int kernel_size = 2;
   const int stride = 2;
-  const int H = 32;
-  const int W = 32;
+  const int H = 16;
+  const int W = 16;
   const int H_out = H / kernel_size;
   const int W_out = W / kernel_size;
 
   MemRef<float, 4> input({N, C, H, W});  
   // MemRef<float, 4> filter({K, C, kernel_size, kernel_size});  
-  // MemRef<float, 1> bias({K});  
+  MemRef<float, 1> bias({K});
   MemRef<float, 4> result({N, C, H_out, W_out});
 
   // Initial the input data
@@ -69,9 +69,9 @@ int main() {
   //   }
   // }
   
-  // for (int k = 0; k < K; k++) {
-  //   bias[k] = 1; 
-  // }
+  for (int k = 0; k < K; k++) {
+    bias[k] = 1; 
+  }
 
   // Print the generated data to verify
 

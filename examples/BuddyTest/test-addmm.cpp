@@ -27,7 +27,7 @@ using namespace buddy;
 
 extern "C" void
 _mlir_ciface_forward(MemRef<float, 2> *result, MemRef<float, 2> *weight,
-                     MemRef<float, 1> *bias, MemRef<float, 2> *input);
+                     MemRef<float, 1> *bias, MemRef<float, 4> *input);
 
 template <typename T, size_t D>
 void printVector(MemRef<T, D> &memref, int level = 0) {
@@ -46,13 +46,13 @@ void printVector(MemRef<T, D> &memref, int level = 0) {
 
 int main() {
   /// Initialize data containers.
-  MemRef<float, 2> input({4,2});
-  MemRef<float, 2> weight({4,2});
-  MemRef<float, 1> bias({4});
-  MemRef<float, 2> result({4,4});
+  MemRef<float, 4> input({1, 1, 16, 16});
+  MemRef<float, 2> weight({128, 256});
+  MemRef<float, 1> bias({128});
+  MemRef<float, 2> result({1, 128});
 
-  int rowNum = 4;
-  int colNum = 2;
+  int rowNum = 16;
+  int colNum = 16;
   for (int i = 0; i < rowNum; i++) {
     for (int j = 0; j < colNum; j++) {
       int index = i * colNum + j;
@@ -60,8 +60,8 @@ int main() {
     }
   }
 
-  rowNum = 4;
-  colNum = 2;
+  rowNum = 128;
+  colNum = 256;
   for (int i = 0; i < rowNum; i++) {
     for (int j = 0; j < colNum; j++) {
       int index = i * colNum + j;
@@ -70,11 +70,11 @@ int main() {
   }
 
   rowNum = 1;
-  colNum = 4;
+  colNum = 128;
   for (int i = 0; i < rowNum; i++) {
     for (int j = 0; j < colNum; j++) {
       int index = i * colNum + j;
-      bias[index] = static_cast<float>(0);
+      bias[index] = static_cast<float>(-1);
       // init result
       result[index] = static_cast<float>(0);
     }
@@ -82,8 +82,8 @@ int main() {
 
   // Print the generated data to verify
   std::cout << "Input: " << std::endl;
-  rowNum = 4;
-  colNum = 2;
+  rowNum = 16;
+  colNum = 16;
   for (int i = 0; i < rowNum; i++) {
     for (int j = 0; j < colNum; j++) {
       int index = i * colNum + j;
@@ -93,8 +93,8 @@ int main() {
   }
 
   std::cout << "Weight: " << std::endl;
-  rowNum = 4;
-  colNum = 2;
+  rowNum = 128;
+  colNum = 256;
   for (int i = 0; i < rowNum; i++) {
     for (int j = 0; j < colNum; j++) {
       int index = i * colNum + j;
@@ -105,7 +105,7 @@ int main() {
 
   std::cout << "Bias: " << std::endl;
   rowNum = 1;
-  colNum = 4;
+  colNum = 128;
   for (int i = 0; i < rowNum; i++) {
     for (int j = 0; j < colNum; j++) {
       int index = i * colNum + j;
@@ -127,8 +127,8 @@ int main() {
   std::cout << "\033[33;1m[Output] \033[0m";
 
   std::cout << "Result: " << std::endl;
-  rowNum = 4;
-  colNum = 4;
+  rowNum = 1;
+  colNum = 128;
   for (int i = 0; i < rowNum; i++) {
     for (int j = 0; j < colNum; j++) {
       int index = i * colNum + j;
