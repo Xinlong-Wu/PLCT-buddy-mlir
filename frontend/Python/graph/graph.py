@@ -609,8 +609,8 @@ class GraphImporter:
         if self._device == DeviceType.GPU:
             placeholder_name = buffer.to_memref(
                 ir.MemRefType.get(
-                    list(node.tensor_meta.shape), 
-                    self._str_to_mlir_dtype(node.tensor_meta.dtype)
+                    list(node.tensor_meta['shape']), 
+                    self._str_to_mlir_dtype(node.tensor_meta['dtype'])
                 ),
                 placeholder_name
             )
