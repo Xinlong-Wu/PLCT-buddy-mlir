@@ -19,6 +19,8 @@ MLIR_ASYNC_RUNTIME := ./../llvm/build/lib/libmlir_async_runtime.dylib
 MTRIPLE := x86_64-apple-darwin
 endif
 
+# ../../build/bin/buddy-opt math-rsqrt.mlir -convert-vector-to-scf -convert-scf-to-cf -convert-vector-to-llvm -convert-math-to-llvm -convert-func-to-llvm | ../../llvm/build/bin/mlir-opt -convert-linalg-to-parallel-loops -canonicalize -gpu-map-parallel-loops -convert-parallel-loops-to-gpu -gpu-kernel-outlining -canonicalize -cse -one-shot-bufferize="bufferize-function-boundaries=1 function-boundary-type-conversion=identity-layout-map"
+
 gpu-test-lower:
 	@${MLIR_OPT} forward.mlir -gpu-kernel-outlining -llvm-request-c-wrappers -convert-vector-to-scf -convert-vector-to-llvm | \
 	${MLIR_OPT} -pass-pipeline="builtin.module(nvvm-attach-target{chip=sm_70 O=3},\
